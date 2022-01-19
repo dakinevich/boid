@@ -2,12 +2,14 @@ import pygame as pyg
 import math
 import random
 import time
+from numba import njit
 
 
 def get_dist(p1, p2):
     return hypo(p1[0]-p2[0], p1[1]-p2[1])
 
 
+@njit(fastmath=True)
 def hypo(l1, l2):
     return math.sqrt((l1)**2 + (l2)**2)
 
@@ -19,26 +21,41 @@ class Bird():
         self.cruis_vlc = 8  # pixels per second
         self.nose_color = nose_color
 
-    def frame(self, birds, delta_t, w, h):
+    def frame(self, birds, this_ind, distanses, delta_t, w, h):
         forse_out = 0.5  # forse that repels
         forse_in = 0.2
         back_forse_range = 30
         to_forse_range = 40
 
-        birds = [[bird, get_dist(bird.pos, self.pos)] for bird in birds]
+        new_birds = []
+        for i in range(len(distanses)):
+            if i != this_ind:
+                new_birds.append([birds[i].pos, distanses[i][this_ind]])
+        birds = new_birds
+
         birds = sorted(birds, key=lambda bird_tuple: bird_tuple[1])
         bird_close = birds[0]
+
+        if bird_close[1] > w-self.pos[0]:  # neural web pro
+            bird_close = [[w, self.pos[1]], w-self.pos[0]]
+        if bird_close[1] > self.pos[0]:
+            bird_close = [[0, self.pos[1]], self.pos[0]]
+        if bird_close[1] > h-self.pos[1]:
+            bird_close = [[self.pos[0], h], h-self.pos[1]]
+        if bird_close[1] > self.pos[1]:
+            bird_close = [[self.pos[0], 0], self.pos[1]]
+
         d = bird_close[1] + 0.0000001  # != 0
         if d < back_forse_range:
             self.vlc = [
-                self.vlc[i] - forse_out*(bird_close[0].pos[i] -
+                self.vlc[i] - forse_out*(bird_close[0][i] -
                                          self.pos[i])/d for i in [0, 1]]
         birds = [bird for bird in birds if bird[1] > to_forse_range]
         bird_far = birds[0]
         d = bird_far[1] + 0.0000001  # != 0
         if d > to_forse_range:
             self.vlc = [
-                self.vlc[i] + forse_in*(bird_far[0].pos[i] -
+                self.vlc[i] + forse_in*(bird_far[0][i] -
                                         self.pos[i])/d for i in [0, 1]]
 
         n = 1  # 1/speed stabilisator strengh
@@ -49,24 +66,6 @@ class Bird():
 
         self.pos = [self.pos[i] +
                     self.vlc[i]*delta_t for i in [0, 1]]
-
-        sped_bump_f = 0.9  # corners bump
-        pos_bump = 2
-        if self.pos[0] > w:
-            self.vlc[0] *= -sped_bump_f
-            self.pos[0] -= pos_bump
-
-        if self.pos[0] < 0:
-            self.vlc[0] *= -sped_bump_f
-            self.pos[0] += pos_bump
-
-        if self.pos[1] > h:
-            self.vlc[1] *= -sped_bump_f
-            self.pos[1] -= pos_bump
-
-        if self.pos[1] < 0:
-            self.vlc[1] *= -sped_bump_f
-            self.pos[1] += pos_bump
 
     def rend(self, window):
         pyg.draw.circle(window, (255, 255, 255), self.pos, 1)
@@ -89,8 +88,16 @@ for i in range(100):
 
 
 def prosess_birds(birds, delta_t):  # phisics cycle
-    for i in range(len(birds)):
-        birds[i].frame(birds[:i] + birds[i+1:], delta_t, w, h)
+    ammout = len(birds)
+    distanses = [[0 for _ in range(ammout)] for _ in range(ammout)]
+    for a in range(ammout):
+        for b in range(a, ammout):
+            dist = get_dist(birds[a].pos, birds[b].pos)
+            distanses[b][a] = dist
+            distanses[a][b] = dist
+
+    for i in range(ammout):
+        birds[i].frame(birds, i, distanses, delta_t, w, h)
 
 
 t = time.time()
@@ -115,6 +122,6 @@ while running:
     [bird.rend(window) for bird in birds]
 
     pyg.display.flip()
-    t = time.time()
+    # t = time.time()
 
 pyg.quit()
